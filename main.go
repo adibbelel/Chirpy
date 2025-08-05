@@ -6,6 +6,7 @@ import (
 	"log"
 	"sync/atomic"
 	"encoding/json"
+	"regexp"
 )
 
 type apiConfig struct {
@@ -62,7 +63,7 @@ func (cfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) {
 
 func jsonHandler(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
-		Body string `json:"Body"`
+		Body string `json:"body"`
 	}
 
 	decoder := json.NewDecoder(r.Body)
@@ -76,11 +77,24 @@ func jsonHandler(w http.ResponseWriter, r *http.Request) {
 	type returnVals struct {
 		Error string `json:"error"`
 		Validity bool `json:"valid"`
+		CleanBody string `json:"cleaned_body"`
 	}
 	respBody := returnVals{
-		Error: "",
 		Validity: true,
 	}
+
+	cleaned := params.Body
+	replacements := map[string]string{
+		"kerfuffle": "****",
+		"sharbert":  "****",
+		"fornax":    "****",
+	}
+
+	for word, replacement := range replacements {
+		pattern := regexp.MustCompile(`(?i)` + regexp.QuoteMeta(word))
+		cleaned = pattern.ReplaceAllString(cleaned, replacement)
+	}
+    respBody.CleanBody = cleaned
 
 	if len(params.Body) > 140 {
 		respBody.Error = "oopsie, too long"
@@ -88,6 +102,7 @@ func jsonHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(400)
 		return
 	}
+
 	dat, err := json.Marshal(respBody)
 	if err != nil {
 		respBody.Error = "Error marshalling JSON"
