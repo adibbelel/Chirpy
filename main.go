@@ -1,22 +1,47 @@
 package main
 
 import (
+	_ "github.com/lib/pq"
 	"fmt"
 	"net/http"
 	"log"
 	"sync/atomic"
 	"encoding/json"
-	"regexp"
+	"github.com/joho/godotenv"
+	"github.com/google/uuid"
+	"os"
+	"time"
+	"database/sql"
+	"github.com/adibbelel/Chirpy/internal/database"
+	
 )
 
 type apiConfig struct {
 	fileserverHits atomic.Int32
+	queries *database.Queries
+	auth string
+}
+
+type User struct {
+	ID        uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Email     string    `json:"email"`
 }
 
 func main () {
+	godotenv.Load()
+	dbURL := os.Getenv("DB_URL")
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		log.Fatalf("Could not open database URL: %v", err)
+	}
+	dbQueries := database.New(db)
+
 	fmt.Println("Starting Server")
 	apiCfg := apiConfig {
 		fileserverHits: atomic.Int32{},
+		queries: dbQueries,
 	}
 	mux := http.NewServeMux()
 	mux.Handle("/app/", http.StripPrefix("/app", apiCfg.middlewareMetricsInc(http.FileServer(http.Dir(".")))))
@@ -24,6 +49,7 @@ func main () {
 	mux.HandleFunc("GET /admin/metrics", apiCfg.metricHandler)
 	mux.HandleFunc("POST /admin/reset", apiCfg.handlerReset)
 	mux.HandleFunc("POST /api/validate_chirp", jsonHandler)
+	mux.HandleFunc("POST /api/users", apiCfg.emailHandler)
 	server := http.Server {
 		Handler: mux,
 		Addr: ":8080",
@@ -38,32 +64,29 @@ func ContentTypeHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("OK"))
 }
 
-func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cfg.fileserverHits.Add(1)
-		next.ServeHTTP(w, r)
-	})
-}
-
-
-func (cfg *apiConfig) metricHandler(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(fmt.Sprintf(`<html>
-  <body>
-    <h1>Welcome, Chirpy Admin</h1>
-    <p>Chirpy has been visited %d times!</p>
-  </body>
-</html>`, cfg.fileserverHits.Load())))
-}
-
 func (cfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) {
+	if cfg.auth != "dev" {
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte("Reset is only allowed in dev environment"))
+		return
+	}
+	err := cfg.queries.Reset(r.Context())
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("Failed to reset the database: " + err.Error()))
+		return
+	}
 	cfg.fileserverHits.Store(0)
 	w.WriteHeader(http.StatusOK)
 }
 
-func jsonHandler(w http.ResponseWriter, r *http.Request) {
+func (cfg *apiConfig) emailHandler(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
-		Body string `json:"body"`
+		Email string `json:"email"`
+	}
+
+	type response struct {
+		User
 	}
 
 	decoder := json.NewDecoder(r.Body)
@@ -74,44 +97,20 @@ func jsonHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(500)
 		return
 	}
-	type returnVals struct {
-		Error string `json:"error"`
-		Validity bool `json:"valid"`
-		CleanBody string `json:"cleaned_body"`
-	}
-	respBody := returnVals{
-		Validity: true,
-	}
 
-	cleaned := params.Body
-	replacements := map[string]string{
-		"kerfuffle": "****",
-		"sharbert":  "****",
-		"fornax":    "****",
-	}
-
-	for word, replacement := range replacements {
-		pattern := regexp.MustCompile(`(?i)` + regexp.QuoteMeta(word))
-		cleaned = pattern.ReplaceAllString(cleaned, replacement)
-	}
-    respBody.CleanBody = cleaned
-
-	if len(params.Body) > 140 {
-		respBody.Error = "oopsie, too long"
-		respBody.Validity = false
-		w.WriteHeader(400)
-		return
-	}
-
-	dat, err := json.Marshal(respBody)
+	user, err := cfg.queries.CreateUser(r.Context(), params.Email)
 	if err != nil {
-		respBody.Error = "Error marshalling JSON"
+		log.Fatalf("Could not create user: %v", err)
+	}
+
+	dat, err := json.Marshal(user)
+	if err != nil {
 		log.Printf("Error marshalling JSON: %s", err)
 		w.WriteHeader(500)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
+	w.WriteHeader(201)
 	w.Write(dat)
 
 }
