@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"log"
 	"sync/atomic"
+	"encoding/json"
 )
 
 type apiConfig struct {
@@ -21,6 +22,7 @@ func main () {
 	mux.HandleFunc("GET /api/healthz", ContentTypeHandler)
 	mux.HandleFunc("GET /admin/metrics", apiCfg.metricHandler)
 	mux.HandleFunc("POST /admin/reset", apiCfg.handlerReset)
+	mux.HandleFunc("POST /api/validate_chirp", jsonHandler)
 	server := http.Server {
 		Handler: mux,
 		Addr: ":8080",
@@ -56,4 +58,45 @@ func (cfg *apiConfig) metricHandler(w http.ResponseWriter, r *http.Request) {
 func (cfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) {
 	cfg.fileserverHits.Store(0)
 	w.WriteHeader(http.StatusOK)
+}
+
+func jsonHandler(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Body string `json:"Body"`
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err := decoder.Decode(&params)
+	if err != nil {
+		log.Printf("Error decoding parameters: %s", err)
+		w.WriteHeader(500)
+		return
+	}
+	type returnVals struct {
+		Error string `json:"error"`
+		Validity bool `json:"valid"`
+	}
+	respBody := returnVals{
+		Error: "",
+		Validity: true,
+	}
+
+	if len(params.Body) > 140 {
+		respBody.Error = "oopsie, too long"
+		respBody.Validity = false
+		w.WriteHeader(400)
+		return
+	}
+	dat, err := json.Marshal(respBody)
+	if err != nil {
+		respBody.Error = "Error marshalling JSON"
+		log.Printf("Error marshalling JSON: %s", err)
+		w.WriteHeader(500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	w.Write(dat)
+
 }
