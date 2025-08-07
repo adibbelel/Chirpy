@@ -2,7 +2,6 @@ package main
 
 import (
 	"net/http"
-	"regexp"
 	"encoding/json"
 	"log"
 )

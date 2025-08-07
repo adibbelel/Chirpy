@@ -5,11 +5,27 @@ import (
 	"encoding/json"
 	"log"
 	"regexp"
+	"github.com/google/uuid"
+	"time"
+	"github.com/adibbelel/Chirpy/internal/database"
 )
+
+type Chirp struct {
+	ID        uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Body     string    `json:"body"`
+	UserID uuid.UUID `json:"user_id"`
+}
+
+type Chirps struct {
+	Chirps []database.Chirp
+}
 
 func (cfg *apiConfig) handlerChirps(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
 		Body string `json:"body"`
+		UserID uuid.UUID`json:"user_id"`
 	}
 
 	decoder := json.NewDecoder(r.Body)
@@ -20,12 +36,18 @@ func (cfg *apiConfig) handlerChirps(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(500)
 		return
 	}
-	type returnVals struct {
+
+	chirp, err := cfg.db.CreateChirp(r.Context(),database.CreateChirpParams{
+		Body: params.Body,
+		UserID: params.UserID,
+	})
+	type response struct {
 		Error string `json:"error"`
 		Validity bool `json:"valid"`
 		CleanBody string `json:"cleaned_body"`
+		Chirp
 	}
-	respBody := returnVals{
+	respBody := response{
 		Validity: true,
 	}
 
@@ -49,16 +71,35 @@ func (cfg *apiConfig) handlerChirps(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dat, err := json.Marshal(respBody)
-	if err != nil {
-		respBody.Error = "Error marshalling JSON"
-		log.Printf("Error marshalling JSON: %s", err)
-		w.WriteHeader(500)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-	w.Write(dat)
+	respondWithJSON(w, http.StatusCreated, response{
+		Chirp: Chirp{
+			ID: chirp.ID,
+			CreatedAt: chirp.CreatedAt,
+			UpdatedAt: chirp.UpdatedAt,
+			Body: chirp.Body,
+			UserID: chirp.UserID,
+		},
+	})
 
 }
 
+func (cfg *apiConfig) handlerGetChirps(w http.ResponseWriter, r *http.Request) {
+	chirps, err := cfg.db.GetChirps(r.Context())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Could not get chirps", err)
+	}
+
+	responseChirps := make([]Chirp, len(chirps))
+	for i, chirp := range chirps {
+		responseChirps[i] = Chirp{
+			ID:        chirp.ID,
+			CreatedAt: chirp.CreatedAt,
+            UpdatedAt: chirp.UpdatedAt,
+            Body:      chirp.Body,
+            UserID:    chirp.UserID,
+        }
+    }
+
+
+	respondWithJSON(w, http.StatusOK, responseChirps)
+}

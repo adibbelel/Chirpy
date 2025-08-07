@@ -18,7 +18,7 @@ import (
 
 type apiConfig struct {
 	fileserverHits atomic.Int32
-	queries *database.Queries
+	db *database.Queries
 	auth string
 }
 
@@ -42,7 +42,7 @@ func main () {
 	fmt.Println("Starting Server")
 	apiCfg := apiConfig {
 		fileserverHits: atomic.Int32{},
-		queries: dbQueries,
+		db: dbQueries,
 		auth: auth,
 	}
 	mux := http.NewServeMux()
@@ -50,7 +50,8 @@ func main () {
 	mux.HandleFunc("GET /api/healthz", ContentTypeHandler)
 	mux.HandleFunc("GET /admin/metrics", apiCfg.metricHandler)
 	mux.HandleFunc("POST /admin/reset", apiCfg.handlerReset)
-	mux.HandleFunc("POST /api/chirps", handlerChirps)
+	mux.HandleFunc("POST /api/chirps", apiCfg.handlerChirps)
+	mux.HandleFunc("GET /api/chirps", apiCfg.handlerGetChirps)
 	mux.HandleFunc("POST /api/users", apiCfg.emailHandler)
 	server := http.Server {
 		Handler: mux,
@@ -72,7 +73,7 @@ func (cfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Reset is only allowed in dev environment"))
 		return
 	}
-	err := cfg.queries.Reset(r.Context())
+	err := cfg.db.Reset(r.Context())
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte("Failed to reset the database: " + err.Error()))
@@ -100,7 +101,7 @@ func (cfg *apiConfig) emailHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := cfg.queries.CreateUser(r.Context(), params.Email)
+	user, err := cfg.db.CreateUser(r.Context(), params.Email)
 	if err != nil {
 		log.Fatalf("Could not create user: %v", err)
 	}

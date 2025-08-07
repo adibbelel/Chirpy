@@ -4,3 +4,6 @@ VALUES (
     gen_random_uuid(), NOW(), NOW(), $1 
 )
 RETURNING *;
+
+-- name: GetUser :one
+SELECT * FROM users WHERE id = $1;
