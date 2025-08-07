@@ -32,6 +32,7 @@ type User struct {
 func main () {
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
+	auth := os.Getenv("PLATFORM")
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
 		log.Fatalf("Could not open database URL: %v", err)
@@ -42,13 +43,14 @@ func main () {
 	apiCfg := apiConfig {
 		fileserverHits: atomic.Int32{},
 		queries: dbQueries,
+		auth: auth,
 	}
 	mux := http.NewServeMux()
 	mux.Handle("/app/", http.StripPrefix("/app", apiCfg.middlewareMetricsInc(http.FileServer(http.Dir(".")))))
 	mux.HandleFunc("GET /api/healthz", ContentTypeHandler)
 	mux.HandleFunc("GET /admin/metrics", apiCfg.metricHandler)
 	mux.HandleFunc("POST /admin/reset", apiCfg.handlerReset)
-	mux.HandleFunc("POST /api/validate_chirp", jsonHandler)
+	mux.HandleFunc("POST /api/chirps", handlerChirps)
 	mux.HandleFunc("POST /api/users", apiCfg.emailHandler)
 	server := http.Server {
 		Handler: mux,
@@ -102,15 +104,15 @@ func (cfg *apiConfig) emailHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Fatalf("Could not create user: %v", err)
 	}
+	
+	respondWithJSON(w, http.StatusCreated, response{
+		User: User{
+			ID: user.ID,
+			CreatedAt: user.CreatedAt,
+			UpdatedAt: user.UpdatedAt,
+			Email: user.Email,
+		},
+	})
 
-	dat, err := json.Marshal(user)
-	if err != nil {
-		log.Printf("Error marshalling JSON: %s", err)
-		w.WriteHeader(500)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(201)
-	w.Write(dat)
 
 }
