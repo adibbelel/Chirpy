@@ -41,6 +41,9 @@ func (cfg *apiConfig) handlerChirps(w http.ResponseWriter, r *http.Request) {
 		Body: params.Body,
 		UserID: params.UserID,
 	})
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Could not create Chirp", err)
+	}
 	type response struct {
 		Error string `json:"error"`
 		Validity bool `json:"valid"`
@@ -102,4 +105,20 @@ func (cfg *apiConfig) handlerGetChirps(w http.ResponseWriter, r *http.Request) {
 
 
 	respondWithJSON(w, http.StatusOK, responseChirps)
+}
+
+func (cfg *apiConfig) handlerGetChirp(w http.ResponseWriter, r *http.Request) {
+	chirpID := r.PathValue("chirpID")
+	chirp, err := cfg.db.GetChirp(r.Context(), uuid.MustParse(chirpID))
+	if err != nil {
+		respondWithError(w, http.StatusNotFound, "Could not get chirp", err)
+	}
+
+	respondWithJSON(w, http.StatusOK, Chirp{
+		ID: chirp.ID,
+		CreatedAt: chirp.CreatedAt,
+		UpdatedAt: chirp.UpdatedAt,
+		Body:      chirp.Body,
+		UserID:    chirp.UserID,
+	})
 }
